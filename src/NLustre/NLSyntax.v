@@ -69,9 +69,25 @@ Module Type NLSYNTAX
     | _ => false
     end.
 
+  Inductive node_decl_ty :=
+  | NodeDeclImported : node_decl_ty
+  | NodeDeclConcrete : node_decl_ty.
+
+  Definition n_defd_precond (n : node_decl_ty)
+    (n_out n_vars : list (ident * (type * clock)))
+    (n_eqs : list equation) : Prop :=
+    match n with
+    | NodeDeclImported =>
+      n_vars = [] /\ n_eqs = []
+    | NodeDeclConcrete =>
+      Permutation (vars_defined n_eqs)
+                  (map fst (n_vars ++ n_out))
+    end.
+
   Record node : Type :=
     mk_node {
         n_name   : ident;
+        n_declty : node_decl_ty;
         n_in     : list (ident * (type * clock));
         n_out    : list (ident * (type * clock));
         n_vars   : list (ident * (type * clock));
@@ -79,8 +95,7 @@ Module Type NLSYNTAX
 
         n_ingt0  : 0 < length n_in;
         n_outgt0 : 0 < length n_out;
-        n_defd   : Permutation (vars_defined n_eqs)
-                               (map fst (n_vars ++ n_out));
+        n_defd   : n_defd_precond n_declty n_out n_vars n_eqs;
         n_vout   : forall out, In out (map fst n_out) ->
                           ~ In out (vars_defined (filter is_fby n_eqs));
         n_nodup  : NoDupMembers (n_in ++ n_vars ++ n_out);
@@ -191,9 +206,13 @@ Module Type NLSYNTAX
       NoDup (vars_defined n.(n_eqs)).
   Proof.
     intro n.
-    rewrite n.(n_defd).
+    destruct n as [? n_declty ? ? ? ? ? ? n_defd ? n_nodup ?].
+    destruct n_declty; simpl in n_defd.
+    destruct n_defd; subst; apply NoDup_nil.
+
+    rewrite n_defd.
     apply fst_NoDupMembers.
-    apply (NoDupMembers_app_r _ _ n.(n_nodup)).
+    apply (NoDupMembers_app_r _ _ n_nodup).
   Qed.
 
   Lemma NoDupMembers_n_out:
@@ -222,12 +241,14 @@ Module Type NLSYNTAX
   Hint Extern 1 (NoDupMembers (n_vars _)) => apply NoDupMembers_n_vars : core.
 
   Lemma n_eqsgt0:
-    forall n, 0 < length n.(n_eqs).
+    forall n, n.(n_declty) = NodeDeclConcrete ->
+         0 < length n.(n_eqs).
   Proof.
-    intro.
+    intros n Conc.
     pose proof (n_defd n) as Defd.
     pose proof (n_outgt0 n) as Out.
-    unfold vars_defined in Defd.
+    unfold n_defd_precond, vars_defined in Defd.
+    rewrite Conc in Defd.
     apply Permutation_length in Defd.
     rewrite flat_map_length, map_length, app_length in Defd.
     destruct (n_eqs n); simpl in *; omega.
